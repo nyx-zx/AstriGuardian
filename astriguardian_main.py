@@ -109,7 +109,7 @@ body {
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# OPEN-METEO CLIENT (CORRECT USAGE)
+# OPEN-METEO CLIENT WITH CACHE
 # ---------------------------------------------------------
 cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
 openmeteo = openmeteo_requests.Client(session=cache_session)
@@ -142,11 +142,22 @@ province = st.selectbox("Selecciona provincia:", list(coords.keys()))
 lat, lon = coords[province]
 
 # ---------------------------------------------------------
-# FETCH WEATHER (CORRECT CLIENT CALL)
+# SAFE FETCH FUNCTION (handles rate-limit)
 # ---------------------------------------------------------
-weather_request = openmeteo.weather_api(
+def safe_fetch(url, params):
+    try:
+        response = openmeteo.weather_api(url, params=params)
+        return response.json()
+    except Exception as e:
+        st.warning("⚠ Open‑Meteo API limit reached — using cached data.")
+        return cache_session.get(url).json()
+
+# ---------------------------------------------------------
+# FETCH WEATHER SAFELY
+# ---------------------------------------------------------
+weather = safe_fetch(
     "https://api.open-meteo.com/v1/forecast",
-    params={
+    {
         "latitude": lat,
         "longitude": lon,
         "hourly": ["temperature_2m", "relativehumidity_2m", "precipitation", "wind_speed_10m", "uv_index"],
@@ -155,18 +166,15 @@ weather_request = openmeteo.weather_api(
     }
 )
 
-air_request = openmeteo.weather_api(
+air = safe_fetch(
     "https://air-quality-api.open-meteo.com/v1/air-quality",
-    params={
+    {
         "latitude": lat,
         "longitude": lon,
         "hourly": ["pm10", "pm2_5", "carbon_monoxide", "nitrogen_dioxide", "sulphur_dioxide", "ozone"],
         "timezone": "auto"
     }
 )
-
-weather = weather_request.json()
-air = air_request.json()
 
 current = weather["current_weather"]
 hourly = weather["hourly"]
