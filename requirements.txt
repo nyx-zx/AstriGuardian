@@ -1,0 +1,6 @@
+streamlit
+plotly
+openmeteo-requests
+requests-cache
+pandas
+leafmap
