@@ -27,7 +27,6 @@ st.title("🛰️ AstriGuardian – EarthGuardian Dashboard")
 st.sidebar.header("Location")
 lat = st.sidebar.number_input("Latitude", value=8.98, format="%.4f")
 lon = st.sidebar.number_input("Longitude", value=-79.52, format="%.4f")
-days = st.sidebar.slider("Forecast days", 1, 7, 5)
 
 st.sidebar.write("Data source: Open-Meteo (weather + air quality)")
 
@@ -43,13 +42,13 @@ def fetch_weather(lat, lon):
         "latitude": lat,
         "longitude": lon,
         "current_weather": True,
-        "daily": "temperature_2m_max,temperature_2m_min",
+        "hourly": "temperature_2m",
         "timezone": "auto",
     }
     r = requests.get(WEATHER_URL, params=params)
     data = r.json()
 
-    if "daily" not in data or "current_weather" not in data:
+    if "hourly" not in data or "current_weather" not in data:
         st.error("Open-Meteo did not return complete weather data.")
         st.json(data)
         return None
@@ -82,7 +81,7 @@ air = fetch_air(lat, lon)
 if weather is None or air is None:
     st.stop()
 
-daily = weather["daily"]
+hourly_weather = weather["hourly"]
 current = weather["current_weather"]
 hourly_air = air["hourly"]
 
@@ -107,18 +106,17 @@ with col_current:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # -------------------------------
-# DAILY TEMPERATURE FORECAST
+# HOURLY TEMPERATURE GRAPH
 # -------------------------------
 st.markdown('<div class="glass">', unsafe_allow_html=True)
-st.subheader("📈 Daily temperature forecast")
+st.subheader("📈 Hourly temperature")
 
-df_daily = pd.DataFrame({
-    "date": daily["time"][:days],
-    "temp_max": daily["temperature_2m_max"][:days],
-    "temp_min": daily["temperature_2m_min"][:days],
-}).set_index("date")
+df_temp = pd.DataFrame({
+    "time": hourly_weather["time"],
+    "temp": hourly_weather["temperature_2m"],
+}).set_index("time")
 
-st.line_chart(df_daily)
+st.line_chart(df_temp)
 st.markdown("</div>", unsafe_allow_html=True)
 
 # -------------------------------
@@ -143,12 +141,11 @@ st.markdown("</div>", unsafe_allow_html=True)
 st.markdown('<div class="glass">', unsafe_allow_html=True)
 st.subheader("🔮 AstriGuardian prediction")
 
-today_max = daily["temperature_2m_max"][0]
-today_min = daily["temperature_2m_min"][0]
+current_temp = current["temperature"]
 current_aqi = hourly_air["european_aqi"][0]
 
-st.write(f"🌡 Today: between **{today_min}°C** and **{today_max}°C**.")
-st.write(f"💨 Current AQI: **{current_aqi}** (lower is better).")
+st.write(f"🌡 Current temperature: **{current_temp}°C**")
+st.write(f"💨 Current AQI: **{current_aqi}** (lower is better)")
 
-st.caption("Prototype AstriGuardian – extend with ML models, alerts, and more.")
+st.caption("AstriGuardian prototype – daily forecast disabled due to API limits.")
 st.markdown("</div>", unsafe_allow_html=True)
