@@ -1,132 +1,104 @@
-# astriguardian_app.py
+# astriguardian.py
 import streamlit as st
-import requests
 import pandas as pd
+from openmeteo_sdk import OpenMeteo
 
-st.set_page_config(page_title="AstriGuardian – EarthGuardian", layout="wide")
+st.set_page_config(page_title="AstriGuardian", layout="wide")
 
-# ---------- UI HEADER ----------
-st.markdown(
-    """
-    <style>
-    .glass-card {
-        background: rgba(255, 255, 255, 0.75);
-        border-radius: 18px;
-        padding: 18px;
-        border: 1px solid rgba(200, 200, 200, 0.6);
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
+# Liquid glass CSS
+st.markdown("""
+<style>
+.glass {
+    background: rgba(255,255,255,0.65);
+    padding: 20px;
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.35);
+    backdrop-filter: blur(12px);
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🛰️ AstriGuardian – EarthGuardian Dashboard")
+
+# Sidebar
+st.sidebar.header("Location")
+lat = st.sidebar.number_input("Latitude", value=8.98)
+lon = st.sidebar.number_input("Longitude", value=-79.52)
+days = st.sidebar.slider("Forecast days", 1, 7, 5)
+
+# Open-Meteo client
+om = OpenMeteo()
+
+# WEATHER FORECAST
+weather = om.forecast(
+    latitude=lat,
+    longitude=lon,
+    current_weather=True,
+    daily=["temperature_2m_max", "temperature_2m_min"],
+    timezone="auto"
 )
 
-st.markdown("## 🛰️ AstriGuardian – EarthGuardian Dashboard")
+# AIR QUALITY
+air = om.air_quality(
+    latitude=lat,
+    longitude=lon,
+    hourly=["pm10", "pm2_5", "european_aqi"],
+    timezone="auto"
+)
 
-# ---------- SIDEBAR ----------
-st.sidebar.markdown("### 🌍 Location")
-lat = st.sidebar.number_input("Latitude", value=8.98, format="%.4f")
-lon = st.sidebar.number_input("Longitude", value=-79.52, format="%.4f")
-days = st.sidebar.slider("Days to forecast", 1, 7, 5)
+# MAP + CURRENT WEATHER
+col1, col2 = st.columns([1,2])
 
-st.sidebar.markdown("Data source: **Open-Meteo**")
+with col1:
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+    st.subheader("📍 Location")
+    st.map(pd.DataFrame({"lat":[lat], "lon":[lon]}))
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- OPEN-METEO CALLS ----------
-WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
-AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
+with col2:
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+    st.subheader("🌤 Current Weather")
+    cw = weather["current_weather"]
+    st.metric("Temperature", f"{cw['temperature']} °C")
+    st.metric("Wind Speed", f"{cw['windspeed']} m/s")
+    st.metric("Wind Direction", f"{cw['winddirection']}°")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# Weather params (note: daily params as comma-separated string)
-weather_params = {
-    "latitude": lat,
-    "longitude": lon,
-    "daily": "temperature_2m_max,temperature_2m_min",
-    "current_weather": True,
-    "timezone": "auto",
-}
-air_params = {
-    "latitude": lat,
-    "longitude": lon,
-    "hourly": "pm10,pm2_5,european_aqi",
-    "timezone": "auto",
-}
+# DAILY FORECAST GRAPH
+st.markdown('<div class="glass">', unsafe_allow_html=True)
+st.subheader("📈 Temperature Forecast")
 
-weather_resp = requests.get(WEATHER_URL, params=weather_params)
-air_resp = requests.get(AIR_URL, params=air_params)
+df_daily = pd.DataFrame({
+    "date": weather["daily"]["time"][:days],
+    "temp_max": weather["daily"]["temperature_2m_max"][:days],
+    "temp_min": weather["daily"]["temperature_2m_min"][:days],
+}).set_index("date")
 
-weather = weather_resp.json()
-air = air_resp.json()
+st.line_chart(df_daily)
+st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- TOP LAYOUT ----------
-col_map, col_current = st.columns([1, 2])
+# AIR QUALITY GRAPH
+st.markdown('<div class="glass">', unsafe_allow_html=True)
+st.subheader("💨 Air Quality (European AQI)")
 
-with col_map:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown("#### 📍 Location")
-    st.map(pd.DataFrame({"lat": [lat], "lon": [lon]}))
-    st.markdown("</div>", unsafe_allow_html=True)
+df_air = pd.DataFrame({
+    "time": air["hourly"]["time"],
+    "aqi": air["hourly"]["european_aqi"],
+    "pm10": air["hourly"]["pm10"],
+    "pm2_5": air["hourly"]["pm2_5"],
+}).set_index("time")
 
-with col_current:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown("#### 🌤 Current conditions")
-    cw = weather.get("current_weather")
-    if cw:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Temperature (°C)", cw["temperature"])
-        c2.metric("Wind speed (m/s)", cw["windspeed"])
-        c3.metric("Direction (°)", cw["winddirection"])
-    else:
-        st.warning("No current weather data available from Open-Meteo.")
-    st.markdown("</div>", unsafe_allow_html=True)
+st.line_chart(df_air[["aqi"]])
+st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- DAILY FORECAST ----------
-st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-st.markdown("#### 📈 Daily temperature forecast")
+# PREDICTION
+st.markdown('<div class="glass">', unsafe_allow_html=True)
+st.subheader("🔮 AstriGuardian Prediction")
 
-daily = weather.get("daily")
-if daily and "time" in daily:
-    df_daily = pd.DataFrame({
-        "date": daily["time"][:days],
-        "temp_max": daily["temperature_2m_max"][:days],
-        "temp_min": daily["temperature_2m_min"][:days],
-    })
-    df_daily.set_index("date", inplace=True)
-    st.line_chart(df_daily)
-else:
-    st.warning("No daily forecast data available from Open-Meteo.")
-st.markdown("</div>", unsafe_allow_html=True)
+today_max = weather["daily"]["temperature_2m_max"][0]
+today_min = weather["daily"]["temperature_2m_min"][0]
+current_aqi = air["hourly"]["european_aqi"][0]
 
-# ---------- AIR QUALITY ----------
-st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-st.markdown("#### 💨 Air quality (European AQI)")
-
-hourly_air = air.get("hourly")
-if hourly_air and "time" in hourly_air:
-    df_air = pd.DataFrame({
-        "time": hourly_air["time"],
-        "aqi": hourly_air["european_aqi"],
-        "pm10": hourly_air["pm10"],
-        "pm2_5": hourly_air["pm2_5"],
-    })
-    df_air.set_index("time", inplace=True)
-    st.line_chart(df_air[["aqi"]])
-else:
-    st.warning("No air quality data available from Open-Meteo.")
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ---------- PREDICTION ----------
-st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-st.markdown("#### 🔮 AstriGuardian prediction")
-
-if daily and "temperature_2m_max" in daily:
-    today_max = daily["temperature_2m_max"][0]
-    today_min = daily["temperature_2m_min"][0]
-    st.write(f"Today looks between **{today_min}°C** and **{today_max}°C**.")
-
-    if hourly_air and "european_aqi" in hourly_air:
-        current_aqi = hourly_air["european_aqi"][0]
-        st.write(f"Current AQI: **{current_aqi}** (lower is better).")
-else:
-    st.write("Not enough data to generate a prediction yet.")
-st.markdown("</div>", unsafe_allow_html=True)
-
-st.caption("Prototype AstriGuardian – extend with ML, alerts, and more liquid-glass UI.")
-
+st.write(f"🌡 Today: **{today_min}°C – {today_max}°C**")
+st.write(f"💨 AQI: **{current_aqi}** (lower is better)")
+st.markdown('</div>', unsafe_allow_html=True)
