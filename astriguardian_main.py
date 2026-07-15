@@ -3,63 +3,86 @@ import streamlit as st
 import requests
 import pandas as pd
 
-st.set_page_config(page_title="AstriGuardian - EarthGuardian", layout="wide")
+st.set_page_config(page_title="AstriGuardian – EarthGuardian", layout="wide")
 
-st.title("🛰️ AstriGuardian – EarthGuardian Dashboard")
+# ---------- UI HEADER ----------
+st.markdown(
+    """
+    <style>
+    .glass-card {
+        background: rgba(255, 255, 255, 0.75);
+        border-radius: 18px;
+        padding: 18px;
+        border: 1px solid rgba(200, 200, 200, 0.6);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-st.sidebar.header("Location settings")
+st.markdown("## 🛰️ AstriGuardian – EarthGuardian Dashboard")
+
+# ---------- SIDEBAR ----------
+st.sidebar.markdown("### 🌍 Location")
 lat = st.sidebar.number_input("Latitude", value=8.98, format="%.4f")
 lon = st.sidebar.number_input("Longitude", value=-79.52, format="%.4f")
 days = st.sidebar.slider("Days to forecast", 1, 7, 5)
 
-st.sidebar.write("Data source: Open-Meteo")
+st.sidebar.markdown("Data source: **Open-Meteo**")
 
-# --- Open-Meteo endpoints ---
+# ---------- OPEN-METEO CALLS ----------
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 
-# --- Fetch weather ---
-params_weather = {
+# Weather params (note: daily params as comma-separated string)
+weather_params = {
     "latitude": lat,
     "longitude": lon,
-    "daily": ["temperature_2m_max", "temperature_2m_min"],
+    "daily": "temperature_2m_max,temperature_2m_min",
     "current_weather": True,
-    "timezone": "auto"
+    "timezone": "auto",
 }
-weather_resp = requests.get(WEATHER_URL, params=params_weather)
-weather = weather_resp.json()
-
-# --- Fetch air quality ---
-params_air = {
+air_params = {
     "latitude": lat,
     "longitude": lon,
-    "hourly": ["pm10", "pm2_5", "european_aqi"],
-    "timezone": "auto"
+    "hourly": "pm10,pm2_5,european_aqi",
+    "timezone": "auto",
 }
-air_resp = requests.get(AIR_URL, params=params_air)
+
+weather_resp = requests.get(WEATHER_URL, params=weather_params)
+air_resp = requests.get(AIR_URL, params=air_params)
+
+weather = weather_resp.json()
 air = air_resp.json()
 
-# --- Layout ---
-col_map, col_info = st.columns([1, 2])
+# ---------- TOP LAYOUT ----------
+col_map, col_current = st.columns([1, 2])
 
 with col_map:
-    st.subheader("Location")
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.markdown("#### 📍 Location")
     st.map(pd.DataFrame({"lat": [lat], "lon": [lon]}))
+    st.markdown("</div>", unsafe_allow_html=True)
 
-with col_info:
-    st.subheader("Current conditions")
-    if "current_weather" in weather:
-        cw = weather["current_weather"]
-        st.metric("Temperature (°C)", cw["temperature"])
-        st.metric("Wind speed (m/s)", cw["windspeed"])
+with col_current:
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.markdown("#### 🌤 Current conditions")
+    cw = weather.get("current_weather")
+    if cw:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Temperature (°C)", cw["temperature"])
+        c2.metric("Wind speed (m/s)", cw["windspeed"])
+        c3.metric("Direction (°)", cw["winddirection"])
     else:
-        st.warning("No current weather data available.")
+        st.warning("No current weather data available from Open-Meteo.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# --- Daily forecast graph ---
-st.subheader("Daily temperature forecast")
+# ---------- DAILY FORECAST ----------
+st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+st.markdown("#### 📈 Daily temperature forecast")
 
-daily = weather.get("daily", {})
-if daily:
+daily = weather.get("daily")
+if daily and "time" in daily:
     df_daily = pd.DataFrame({
         "date": daily["time"][:days],
         "temp_max": daily["temperature_2m_max"][:days],
@@ -68,13 +91,15 @@ if daily:
     df_daily.set_index("date", inplace=True)
     st.line_chart(df_daily)
 else:
-    st.warning("No daily forecast data available.")
+    st.warning("No daily forecast data available from Open-Meteo.")
+st.markdown("</div>", unsafe_allow_html=True)
 
-# --- Air quality graph ---
-st.subheader("Air quality (European AQI)")
+# ---------- AIR QUALITY ----------
+st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+st.markdown("#### 💨 Air quality (European AQI)")
 
-hourly_air = air.get("hourly", {})
-if hourly_air:
+hourly_air = air.get("hourly")
+if hourly_air and "time" in hourly_air:
     df_air = pd.DataFrame({
         "time": hourly_air["time"],
         "aqi": hourly_air["european_aqi"],
@@ -84,20 +109,24 @@ if hourly_air:
     df_air.set_index("time", inplace=True)
     st.line_chart(df_air[["aqi"]])
 else:
-    st.warning("No air quality data available.")
+    st.warning("No air quality data available from Open-Meteo.")
+st.markdown("</div>", unsafe_allow_html=True)
 
-# --- Simple prediction text ---
-st.subheader("AstriGuardian prediction")
+# ---------- PREDICTION ----------
+st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+st.markdown("#### 🔮 AstriGuardian prediction")
 
-if daily:
+if daily and "temperature_2m_max" in daily:
     today_max = daily["temperature_2m_max"][0]
     today_min = daily["temperature_2m_min"][0]
-    st.write(f"🌍 Today: between **{today_min}°C** and **{today_max}°C**.")
-    if hourly_air:
-        current_aqi = hourly_air["european_aqi"][0]
-        st.write(f"💨 Current AQI: **{current_aqi}** (lower is better).")
-else:
-    st.write("No forecast data to generate prediction.")
+    st.write(f"Today looks between **{today_min}°C** and **{today_max}°C**.")
 
-st.caption("Prototype AstriGuardian – extend with ML models, alerts, and more.")
+    if hourly_air and "european_aqi" in hourly_air:
+        current_aqi = hourly_air["european_aqi"][0]
+        st.write(f"Current AQI: **{current_aqi}** (lower is better).")
+else:
+    st.write("Not enough data to generate a prediction yet.")
+st.markdown("</div>", unsafe_allow_html=True)
+
+st.caption("Prototype AstriGuardian – extend with ML, alerts, and more liquid-glass UI.")
 
