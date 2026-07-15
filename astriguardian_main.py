@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ---------------------------------------------------------
 # PAGE CONFIG
@@ -99,18 +99,23 @@ city = st.selectbox("Choose a city", list(CITIES.keys()))
 lat, lon = CITIES[city]
 
 # ---------------------------------------------------------
-# OPEN-METEO BULK FORECAST (NO RATE LIMITS)
+# OPEN-METEO ARCHIVE FORECAST (NO RATE LIMITS EVER)
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600)
-def fetch_bulk(lat, lon):
-    url = "https://api.open-meteo.com/v1/forecast"
+def fetch_archive(lat, lon):
+    today = datetime.utcnow().date()
+    start = today - timedelta(days=1)
+    end = today + timedelta(days=5)
+
+    url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": lat,
         "longitude": lon,
-        "current_weather": True,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
         "daily": [
             "temperature_2m_max",
-            "temperature_2_2m_min",
+            "temperature_2m_min",
             "weathercode",
             "relativehumidity_2m_max",
             "relativehumidity_2m_min"
@@ -120,9 +125,8 @@ def fetch_bulk(lat, lon):
     r = requests.get(url, params=params)
     return r.json()
 
-data = fetch_bulk(lat, lon)
+data = fetch_archive(lat, lon)
 
-current = data["current_weather"]
 daily = data["daily"]
 
 # ---------------------------------------------------------
@@ -149,21 +153,31 @@ def describe(code):
     return WEATHER_CODES.get(code, "Unknown")
 
 # ---------------------------------------------------------
+# CURRENT WEATHER (from today's daily)
+# ---------------------------------------------------------
+today_index = daily["time"].index(str(datetime.utcnow().date()))
+
+temp_max = daily["temperature_2m_max"][today_index]
+temp_min = daily["temperature_2m_min"][today_index]
+hum_max = daily["relativehumidity_2m_max"][today_index]
+hum_min = daily["relativehumidity_2m_min"][today_index]
+desc = describe(daily["weathercode"][today_index])
+
+current_temp = (temp_max + temp_min) / 2
+current_hum = (hum_max + hum_min) / 2
+
+# ---------------------------------------------------------
 # CURRENT WEATHER + MAP
 # ---------------------------------------------------------
 col1, col2 = st.columns([1.2, 1])
 
 with col1:
-    temp = current["temperature"]
-    wind = current["windspeed"]
-    desc = describe(current["weathercode"])
-
     st.markdown(f"""
     <div class="glass">
         <div class="title">{city}</div>
-        <div class="subtitle">Current conditions</div>
-        <div class="value">{temp:.1f}°C</div>
-        <div class="subtitle">Wind: {wind:.1f} km/h</div>
+        <div class="subtitle">Current conditions (approx)</div>
+        <div class="value">{current_temp:.1f}°C</div>
+        <div class="subtitle">Humidity: {current_hum:.0f}%</div>
         <div class="subtitle">Weather: {desc}</div>
     </div>
     """, unsafe_allow_html=True)
@@ -184,7 +198,7 @@ st.markdown("<br><h3 class='title'>Next Days Forecast</h3>", unsafe_allow_html=T
 
 dates = daily["time"]
 tmax = daily["temperature_2m_max"]
-tmin = daily["temperature_2_2m_min"]
+tmin = daily["temperature_2m_min"]
 codes = daily["weathercode"]
 
 forecast_cols = st.columns(4)
