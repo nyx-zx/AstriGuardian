@@ -99,23 +99,28 @@ city = st.selectbox("Choose a city", list(CITIES.keys()))
 lat, lon = CITIES[city]
 
 # ---------------------------------------------------------
-# OPEN-METEO DAILY FORECAST (SAFE, NO RATE LIMITS)
+# OPEN-METEO BULK FORECAST (NO RATE LIMITS)
 # ---------------------------------------------------------
-@st.cache_data(ttl=900)
-def fetch_daily(lat, lon):
+@st.cache_data(ttl=3600)
+def fetch_bulk(lat, lon):
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat,
         "longitude": lon,
         "current_weather": True,
-        "daily": ["temperature_2m_max", "temperature_2m_min", "weathercode"],
+        "daily": [
+            "temperature_2m_max",
+            "temperature_2_2m_min",
+            "weathercode",
+            "relativehumidity_2m_max",
+            "relativehumidity_2m_min"
+        ],
         "timezone": "auto"
     }
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
+    r = requests.get(url, params=params)
     return r.json()
 
-data = fetch_daily(lat, lon)
+data = fetch_bulk(lat, lon)
 
 current = data["current_weather"]
 daily = data["daily"]
@@ -179,7 +184,7 @@ st.markdown("<br><h3 class='title'>Next Days Forecast</h3>", unsafe_allow_html=T
 
 dates = daily["time"]
 tmax = daily["temperature_2m_max"]
-tmin = daily["temperature_2m_min"]
+tmin = daily["temperature_2_2m_min"]
 codes = daily["weathercode"]
 
 forecast_cols = st.columns(4)
