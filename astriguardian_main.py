@@ -109,7 +109,7 @@ body {
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# OPEN-METEO CLIENT WITH CACHE
+# OPEN-METEO CLIENT
 # ---------------------------------------------------------
 cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
 openmeteo = openmeteo_requests.Client(session=cache_session)
@@ -142,20 +142,23 @@ province = st.selectbox("Selecciona provincia:", list(coords.keys()))
 lat, lon = coords[province]
 
 # ---------------------------------------------------------
-# SAFE FETCH FUNCTION (handles rate-limit)
+# SAFE FETCH WITH SESSION STATE FALLBACK
 # ---------------------------------------------------------
-def safe_fetch(url, params):
+def safe_fetch(name, url, params):
     try:
         response = openmeteo.weather_api(url, params=params)
-        return response.json()
-    except Exception as e:
-        st.warning("⚠ Open‑Meteo API limit reached — using cached data.")
-        return cache_session.get(url).json()
+        data = response.json()
+        st.session_state[name] = data
+        return data
+    except Exception:
+        st.warning(f"⚠ API limit reached — using cached {name} data.")
+        return st.session_state.get(name)
 
 # ---------------------------------------------------------
 # FETCH WEATHER SAFELY
 # ---------------------------------------------------------
 weather = safe_fetch(
+    "weather",
     "https://api.open-meteo.com/v1/forecast",
     {
         "latitude": lat,
@@ -167,6 +170,7 @@ weather = safe_fetch(
 )
 
 air = safe_fetch(
+    "air",
     "https://air-quality-api.open-meteo.com/v1/air-quality",
     {
         "latitude": lat,
@@ -176,6 +180,9 @@ air = safe_fetch(
     }
 )
 
+# ---------------------------------------------------------
+# EXTRACT DATA
+# ---------------------------------------------------------
 current = weather["current_weather"]
 hourly = weather["hourly"]
 air_hourly = air["hourly"]
