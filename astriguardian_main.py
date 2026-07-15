@@ -1,174 +1,103 @@
-import pygame
-import sys
-from datetime import datetime
+# astriguardian_app.py
+import streamlit as st
+import requests
+import pandas as pd
 
-pygame.init()
+st.set_page_config(page_title="AstriGuardian - EarthGuardian", layout="wide")
 
-WIDTH, HEIGHT = 1000, 650
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("LabGuard OS")
+st.title("🛰️ AstriGuardian – EarthGuardian Dashboard")
 
-font_title = pygame.font.SysFont("Segoe UI", 32, bold=True)
-font = pygame.font.SysFont("Segoe UI", 22)
-font_small = pygame.font.SysFont("Segoe UI", 18)
+st.sidebar.header("Location settings")
+lat = st.sidebar.number_input("Latitude", value=8.98, format="%.4f")
+lon = st.sidebar.number_input("Longitude", value=-79.52, format="%.4f")
+days = st.sidebar.slider("Days to forecast", 1, 7, 5)
 
-WHITE = (255, 255, 255)
-BG = (243, 243, 243)
-BLUE = (0, 120, 215)
-ACCENT = (98, 155, 255)
-TEXT = (30, 30, 30)
-SUBTEXT = (100, 100, 100)
-GRAY = (200, 200, 200)
-LIGHT_GRAY = (230, 230, 230)
+st.sidebar.write("Data source: Open-Meteo")
 
-SETUP_NAME = 0
-SETUP_DOWNLOAD = 1
-SETUP_CONFIG = 2
-DESKTOP = 3
-LABGUARD = 4
+# --- Open-Meteo endpoints ---
+WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
+AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 
-state = SETUP_NAME
-name_input = ""
-user_name = ""
-progress = 0.0
-current_view = None
-counters = {"saludo": 0, "fecha": 0, "contador": 0}
+# --- Fetch weather ---
+params_weather = {
+    "latitude": lat,
+    "longitude": lon,
+    "daily": ["temperature_2m_max", "temperature_2m_min"],
+    "current_weather": True,
+    "timezone": "auto"
+}
+weather_resp = requests.get(WEATHER_URL, params=params_weather)
+weather = weather_resp.json()
 
-clock = pygame.time.Clock()
+# --- Fetch air quality ---
+params_air = {
+    "latitude": lat,
+    "longitude": lon,
+    "hourly": ["pm10", "pm2_5", "european_aqi"],
+    "timezone": "auto"
+}
+air_resp = requests.get(AIR_URL, params=params_air)
+air = air_resp.json()
 
-def draw_button(text, x, y, w, h, mouse):
-    rect = pygame.Rect(x, y, w, h)
-    color = LIGHT_GRAY if rect.collidepoint(mouse) else WHITE
-    pygame.draw.rect(screen, color, rect, border_radius=10)
-    pygame.draw.rect(screen, GRAY, rect, 1, border_radius=10)
-    label = font.render(text, True, TEXT)
-    screen.blit(label, (x + w//2 - label.get_width()//2,
-                        y + h//2 - label.get_height()//2))
-    return rect
+# --- Layout ---
+col_map, col_info = st.columns([1, 2])
 
-def draw_progress(x, y, w, h, p):
-    pygame.draw.rect(screen, GRAY, (x, y, w, h), border_radius=10)
-    pygame.draw.rect(screen, ACCENT, (x, y, int(w * p), h), border_radius=10)
+with col_map:
+    st.subheader("Location")
+    st.map(pd.DataFrame({"lat": [lat], "lon": [lon]}))
 
-def draw_icon(text, x, y, mouse):
-    rect = pygame.Rect(x, y, 90, 90)
-    pygame.draw.rect(screen, WHITE, rect, border_radius=12)
-    pygame.draw.rect(screen, GRAY, rect, 1, border_radius=12)
-    label = font_small.render(text, True, TEXT)
-    screen.blit(label, (x + 45 - label.get_width()//2, y + 100))
-    return rect
+with col_info:
+    st.subheader("Current conditions")
+    if "current_weather" in weather:
+        cw = weather["current_weather"]
+        st.metric("Temperature (°C)", cw["temperature"])
+        st.metric("Wind speed (m/s)", cw["windspeed"])
+    else:
+        st.warning("No current weather data available.")
 
-while True:
-    mouse = pygame.mouse.get_pos()
+# --- Daily forecast graph ---
+st.subheader("Daily temperature forecast")
 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            sys.exit()
+daily = weather.get("daily", {})
+if daily:
+    df_daily = pd.DataFrame({
+        "date": daily["time"][:days],
+        "temp_max": daily["temperature_2m_max"][:days],
+        "temp_min": daily["temperature_2m_min"][:days],
+    })
+    df_daily.set_index("date", inplace=True)
+    st.line_chart(df_daily)
+else:
+    st.warning("No daily forecast data available.")
 
-        if state == SETUP_NAME:
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_RETURN and name_input:
-                    user_name = name_input
-                    state = SETUP_DOWNLOAD
-                    progress = 0.0
-                elif event.key == pygame.K_BACKSPACE:
-                    name_input = name_input[:-1]
-                else:
-                    if len(name_input) < 20 and event.unicode.isprintable():
-                        name_input += event.unicode
+# --- Air quality graph ---
+st.subheader("Air quality (European AQI)")
 
-        elif state == DESKTOP:
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if lab_icon.collidepoint(mouse):
-                    state = LABGUARD
-                    current_view = None
+hourly_air = air.get("hourly", {})
+if hourly_air:
+    df_air = pd.DataFrame({
+        "time": hourly_air["time"],
+        "aqi": hourly_air["european_aqi"],
+        "pm10": hourly_air["pm10"],
+        "pm2_5": hourly_air["pm2_5"],
+    })
+    df_air.set_index("time", inplace=True)
+    st.line_chart(df_air[["aqi"]])
+else:
+    st.warning("No air quality data available.")
 
-        elif state == LABGUARD:
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    state = DESKTOP
-                elif event.key == pygame.K_1:
-                    counters["saludo"] += 1
-                    current_view = "saludo"
-                elif event.key == pygame.K_2:
-                    counters["fecha"] += 1
-                    current_view = "fecha"
-                elif event.key == pygame.K_3:
-                    counters["contador"] += 1
-                    current_view = "contador"
+# --- Simple prediction text ---
+st.subheader("AstriGuardian prediction")
 
-    # DRAW
-    if state == SETUP_NAME:
-        screen.fill(WHITE)
-        t = font_title.render("Configurar LabGuard OS", True, TEXT)
-        screen.blit(t, (WIDTH//2 - t.get_width()//2, 120))
-        s = font.render("Ingresa tu nombre para continuar", True, SUBTEXT)
-        screen.blit(s, (WIDTH//2 - s.get_width()//2, 180))
+if daily:
+    today_max = daily["temperature_2m_max"][0]
+    today_min = daily["temperature_2m_min"][0]
+    st.write(f"🌍 Today: between **{today_min}°C** and **{today_max}°C**.")
+    if hourly_air:
+        current_aqi = hourly_air["european_aqi"][0]
+        st.write(f"💨 Current AQI: **{current_aqi}** (lower is better).")
+else:
+    st.write("No forecast data to generate prediction.")
 
-        box = pygame.Rect(WIDTH//2 - 200, 260, 400, 45)
-        pygame.draw.rect(screen, WHITE, box, border_radius=10)
-        pygame.draw.rect(screen, GRAY, box, 1, border_radius=10)
-        txt = font.render(name_input, True, TEXT)
-        screen.blit(txt, (box.x + 10, box.y + 8))
+st.caption("Prototype AstriGuardian – extend with ML models, alerts, and more.")
 
-        hint = font_small.render("Presiona Enter para continuar", True, SUBTEXT)
-        screen.blit(hint, (WIDTH//2 - hint.get_width()//2, 320))
-
-    elif state == SETUP_DOWNLOAD:
-        screen.fill(WHITE)
-        t = font_title.render("Descargando archivos…", True, TEXT)
-        screen.blit(t, (WIDTH//2 - t.get_width()//2, 150))
-        progress += 0.003
-        if progress >= 1.0:
-            state = SETUP_CONFIG
-            progress = 0.0
-        draw_progress(200, 300, 600, 30, progress)
-
-    elif state == SETUP_CONFIG:
-        screen.fill(WHITE)
-        t = font_title.render("Configurando tu dispositivo…", True, TEXT)
-        screen.blit(t, (WIDTH//2 - t.get_width()//2, 150))
-        progress += 0.002
-        if progress >= 1.0:
-            state = DESKTOP
-        draw_progress(200, 300, 600, 30, progress)
-
-    elif state == DESKTOP:
-        screen.fill(ACCENT)
-        lab_icon = draw_icon("LabGuard", 80, 120, mouse)
-        pygame.draw.rect(screen, WHITE, (0, HEIGHT - 50, WIDTH, 50))
-        bar = font_small.render(f"Escritorio de {user_name}", True, TEXT)
-        screen.blit(bar, (20, HEIGHT - 35))
-
-    elif state == LABGUARD:
-        screen.fill(BG)
-        win_x, win_y, win_w, win_h = 150, 60, 700, 520
-        pygame.draw.rect(screen, WHITE, (win_x, win_y, win_w, win_h), border_radius=12)
-        pygame.draw.rect(screen, GRAY, (win_x, win_y, win_w, win_h), 1, border_radius=12)
-        pygame.draw.rect(screen, BLUE, (win_x, win_y, win_w, 45), border_radius=12)
-        title = font_title.render("LabGuard", True, WHITE)
-        screen.blit(title, (win_x + 20, win_y + 5))
-
-        draw_button("1. Saludo personalizado", win_x + 150, win_y + 100, 400, 50, mouse)
-        draw_button("2. Fecha y hora actual", win_x + 150, win_y + 170, 400, 50, mouse)
-        draw_button("3. Contadores de uso", win_x + 150, win_y + 240, 400, 50, mouse)
-        draw_button("ESC. Volver al escritorio", win_x + 150, win_y + 310, 400, 50, mouse)
-
-        if current_view == "saludo":
-            msg = font.render(f"Hola, {user_name}!", True, TEXT)
-            screen.blit(msg, (win_x + 250, win_y + 400))
-        elif current_view == "fecha":
-            now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            msg = font.render(now, True, TEXT)
-            screen.blit(msg, (win_x + 230, win_y + 400))
-        elif current_view == "contador":
-            m1 = font_small.render(f"Saludo: {counters['saludo']}", True, TEXT)
-            m2 = font_small.render(f"Fecha: {counters['fecha']}", True, TEXT)
-            m3 = font_small.render(f"Contador: {counters['contador']}", True, TEXT)
-            screen.blit(m1, (win_x + 250, win_y + 380))
-            screen.blit(m2, (win_x + 250, win_y + 410))
-            screen.blit(m3, (win_x + 250, win_y + 440))
-
-    pygame.display.update()
-    clock.tick(60)
