@@ -109,7 +109,7 @@ body {
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# OPEN-METEO CLIENT
+# OPEN-METEO CLIENT (CORRECT USAGE)
 # ---------------------------------------------------------
 cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
 openmeteo = openmeteo_requests.Client(session=cache_session)
@@ -142,13 +142,31 @@ province = st.selectbox("Selecciona provincia:", list(coords.keys()))
 lat, lon = coords[province]
 
 # ---------------------------------------------------------
-# FETCH WEATHER
+# FETCH WEATHER (CORRECT CLIENT CALL)
 # ---------------------------------------------------------
-weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,relativehumidity_2m,precipitation,wind_speed_10m,uv_index&current_weather=true&timezone=auto"
-air_url = f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}&hourly=pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone&timezone=auto"
+weather_request = openmeteo.weather_api(
+    "https://api.open-meteo.com/v1/forecast",
+    params={
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": ["temperature_2m", "relativehumidity_2m", "precipitation", "wind_speed_10m", "uv_index"],
+        "current_weather": True,
+        "timezone": "auto"
+    }
+)
 
-weather = openmeteo.weather_api(weather_url).json()
-air = openmeteo.weather_api(air_url).json()
+air_request = openmeteo.weather_api(
+    "https://air-quality-api.open-meteo.com/v1/air-quality",
+    params={
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": ["pm10", "pm2_5", "carbon_monoxide", "nitrogen_dioxide", "sulphur_dioxide", "ozone"],
+        "timezone": "auto"
+    }
+)
+
+weather = weather_request.json()
+air = air_request.json()
 
 current = weather["current_weather"]
 hourly = weather["hourly"]
@@ -187,7 +205,6 @@ rain_next = hourly["precipitation"][1:4]
 will_rain = any(v > 0.5 for v in rain_next)
 
 col7.markdown(widget("Predicción", "Lluvia pronto" if will_rain else "Sin lluvia", 100 if will_rain else 20), unsafe_allow_html=True)
-
 col8.markdown(widget("Hora", datetime.now().strftime("%H:%M"), 50), unsafe_allow_html=True)
 
 # ---------------------------------------------------------
@@ -270,4 +287,3 @@ chart_col.plotly_chart(fig, use_container_width=True)
 m = leafmap.Map(center=(lat, lon), zoom=8)
 m.add_marker(location=(lat, lon), popup=province)
 map_col.write(m.to_streamlit(height=300))
-
