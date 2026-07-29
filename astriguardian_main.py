@@ -5,23 +5,38 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 
 # ---------------------------------------------------------
-# CONFIG & LIQUIDGLASS STYLE
+# STREAMLIT CONFIG & LIQUIDGLASS STYLE
 # ---------------------------------------------------------
 st.set_page_config(page_title="AstriGuardian – EarthGuardian", layout="wide")
 
 st.markdown("""
 <style>
 .liquidglass {
-    background: rgba(255,255,255,0.70);
-    padding: 20px;
-    border-radius: 22px;
-    border: 1px solid rgba(200,200,200,0.6);
+    background: rgba(255,255,255,0.55);
+    padding: 22px;
+    border-radius: 25px;
+    border: 1px solid rgba(255,255,255,0.35);
     backdrop-filter: blur(18px);
+    box-shadow: 0 4px 25px rgba(0,0,0,0.15);
+    transition: all 0.3s ease;
+}
+.liquidglass:hover {
+    transform: scale(1.02);
+}
+.predcard {
+    background: rgba(255,255,255,0.45);
+    padding: 18px;
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.25);
+    backdrop-filter: blur(14px);
+    margin-right: 15px;
+    min-width: 180px;
+    display: inline-block;
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🛰️ AstriGuardian – EarthGuardian Dashboard")
+st.title("🛰️ AstriGuardian — EarthGuardian Dashboard")
 
 # ---------------------------------------------------------
 # SIDEBAR
@@ -33,6 +48,9 @@ days_ahead = st.sidebar.slider("Days to predict", 1, 7, 3)
 
 st.sidebar.write("Data: Open-Meteo (hourly weather + air quality)")
 
+# ---------------------------------------------------------
+# API ENDPOINTS
+# ---------------------------------------------------------
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 
@@ -44,16 +62,11 @@ def fetch_weather(lat, lon):
         "latitude": lat,
         "longitude": lon,
         "current_weather": True,
-        "hourly": "temperature_2m",
+        "hourly": "temperature_2m,relativehumidity_2m,dewpoint_2m",
         "timezone": "auto",
     }
     r = requests.get(WEATHER_URL, params=params)
-    data = r.json()
-    if "hourly" not in data or "current_weather" not in data:
-        st.error("Weather data incomplete.")
-        st.json(data)
-        return None
-    return data
+    return r.json()
 
 def fetch_air(lat, lon):
     params = {
@@ -63,12 +76,7 @@ def fetch_air(lat, lon):
         "timezone": "auto",
     }
     r = requests.get(AIR_URL, params=params)
-    data = r.json()
-    if "hourly" not in data:
-        st.error("Air quality data incomplete.")
-        st.json(data)
-        return None
-    return data
+    return r.json()
 
 # ---------------------------------------------------------
 # FETCH DATA
@@ -76,16 +84,28 @@ def fetch_air(lat, lon):
 weather = fetch_weather(lat, lon)
 air = fetch_air(lat, lon)
 
-if weather is None or air is None:
+if "hourly" not in weather or "current_weather" not in weather:
+    st.error("Weather data incomplete.")
+    st.json(weather)
+    st.stop()
+
+if "hourly" not in air:
+    st.error("Air quality data incomplete.")
+    st.json(air)
     st.stop()
 
 hourly_weather = weather["hourly"]
 current = weather["current_weather"]
 hourly_air = air["hourly"]
 
+# ---------------------------------------------------------
+# DATAFRAMES
+# ---------------------------------------------------------
 df_temp = pd.DataFrame({
     "time": hourly_weather["time"],
     "temp": hourly_weather["temperature_2m"],
+    "humidity": hourly_weather["relativehumidity_2m"],
+    "dew": hourly_weather["dewpoint_2m"],
 })
 df_temp["date"] = df_temp["time"].str.slice(0, 10)
 df_temp.set_index("time", inplace=True)
@@ -99,7 +119,7 @@ df_air = pd.DataFrame({
 df_air.set_index("time", inplace=True)
 
 # ---------------------------------------------------------
-# TOP WIDGETS: MAP + CURRENT WEATHER
+# WIDGETS: MAP + CURRENT WEATHER
 # ---------------------------------------------------------
 col_map, col_current = st.columns([1, 2])
 
@@ -111,18 +131,19 @@ with col_map:
 
 with col_current:
     st.markdown('<div class="liquidglass">', unsafe_allow_html=True)
-    st.subheader("🌤 Current Weather")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Temperature (°C)", current["temperature"])
-    c2.metric("Wind speed (m/s)", current["windspeed"])
-    c3.metric("Wind direction (°)", current["winddirection"])
+    st.subheader("🌤 Current Weather (LiquidGlass Widget)")
+    st.write(f"### {current['temperature']}°C")
+    st.write(f"**Wind:** {current['windspeed']} m/s")
+    st.write(f"**Direction:** {current['winddirection']}°")
+    st.write(f"**Humidity:** {df_temp['humidity'].iloc[-1]}%")
+    st.write(f"**Dew Point:** {df_temp['dew'].iloc[-1]}°C")
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # HOURLY TEMPERATURE WIDGET
 # ---------------------------------------------------------
 st.markdown('<div class="liquidglass">', unsafe_allow_html=True)
-st.subheader("📈 Hourly temperature")
+st.subheader("📈 Hourly Temperature (LiquidGlass Widget)")
 st.line_chart(df_temp[["temp"]])
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -130,60 +151,64 @@ st.markdown("</div>", unsafe_allow_html=True)
 # AIR QUALITY WIDGET
 # ---------------------------------------------------------
 st.markdown('<div class="liquidglass">', unsafe_allow_html=True)
-st.subheader("💨 Air quality (European AQI)")
+st.subheader("💨 Air Quality (LiquidGlass Widget)")
 st.line_chart(df_air[["aqi"]])
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# PREDICTIONS (ML + WIDGETS)
+# ML PREDICTIONS
 # ---------------------------------------------------------
 st.markdown('<div class="liquidglass">', unsafe_allow_html=True)
-st.subheader("🔮 Predictions")
+st.subheader("🔮 Predictions (LiquidGlass Widgets + ML)")
 
-# Build simple ML model on hourly temps
+# Build ML model
 df_temp_sorted = df_temp.reset_index().copy()
 df_temp_sorted["t_index"] = np.arange(len(df_temp_sorted))
 X = df_temp_sorted[["t_index"]].values
 y = df_temp_sorted["temp"].values
 
+future_days = []
+
 if len(X) > 10:
     model = LinearRegression()
     model.fit(X, y)
 
-    # Predict next N days (assuming 24 hours per day)
     hours_per_day = 24
     last_index = df_temp_sorted["t_index"].iloc[-1]
-    future_days = []
+
     for d in range(1, days_ahead + 1):
         start = last_index + (d - 1) * hours_per_day + 1
         end = last_index + d * hours_per_day
         future_indices = np.arange(start, end).reshape(-1, 1)
         preds = model.predict(future_indices)
         future_days.append({
-            "day_offset": d,
-            "min_pred": float(np.min(preds)),
-            "max_pred": float(np.max(preds)),
+            "day": d,
+            "min": float(np.min(preds)),
+            "max": float(np.max(preds)),
         })
 
-    # Horizontal widgets for predictions
-    st.markdown("##### Upcoming days (prediction widgets)")
-    cols = st.columns(len(future_days))
-    for i, day in enumerate(future_days):
-        with cols[i]:
-            st.markdown("###### Day +" + str(day["day_offset"]))
-            st.write(f"Min: {day['min_pred']:.1f}°C")
-            st.write(f"Max: {day['max_pred']:.1f}°C")
-else:
-    st.write("Not enough data for ML predictions yet.")
+# ---------------------------------------------------------
+# HORIZONTAL SCROLL WIDGETS
+# ---------------------------------------------------------
+st.write("### Scrollable Prediction Widgets")
 
-# Current day summary widget
-st.markdown("##### Today summary")
-c1, c2 = st.columns(2)
-with c1:
-    st.write(f"Current temperature: **{current['temperature']}°C**")
-with c2:
-    current_aqi = hourly_air["european_aqi"][0]
-    st.write(f"Current AQI: **{current_aqi}** (lower is better)")
+scroll = st.container()
+with scroll:
+    st.markdown('<div style="white-space: nowrap; overflow-x: auto;">', unsafe_allow_html=True)
 
-st.caption("AstriGuardian – ML predictions based on hourly temperature using scikit-learn.")
+    for day in future_days:
+        st.markdown(
+            f"""
+            <div class="predcard">
+                <h4>Day +{day['day']}</h4>
+                <p>Min: {day['min']:.1f}°C</p>
+                <p>Max: {day['max']:.1f}°C</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+st.caption("AstriGuardian — ML predictions using scikit-learn.")
 st.markdown("</div>", unsafe_allow_html=True)
