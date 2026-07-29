@@ -154,18 +154,19 @@ df_air.set_index("time", inplace=True)
 # ---------------------------------------------------------
 # HELPER: METRIC WIDGET WITH PROGRESS BAR
 # ---------------------------------------------------------
-def metric_widget(label, value, min_val, max_val):
-    # normalize 0–100
+def metric_widget(label, value, min_val, max_val, unit=""):
+    # value is numeric; format for display
+    display_val = f"{value:.1f}{unit}" if isinstance(value, (int, float)) else str(value)
     try:
-        pct = (value - min_val) / (max_val - min_val)
-    except ZeroDivisionError:
+        pct = (float(value) - min_val) / (max_val - min_val)
+    except Exception:
         pct = 0.0
     pct = max(0.0, min(1.0, pct)) * 100
 
     st.markdown(
         f"""
         <div class="metric-card">
-            <div class="metric-value">{value}</div>
+            <div class="metric-value">{display_val}</div>
             <div class="metric-label">{label}</div>
             <div class="metric-bar">
                 <div class="metric-bar-fill" style="width:{pct:.1f}%"></div>
@@ -198,13 +199,13 @@ with col_widgets:
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        metric_widget("Temperature (°C)", f"{temp_val:.1f}", -10, 45)
+        metric_widget("Temperature (°C)", temp_val, -10, 45, "°C")
     with c2:
-        metric_widget("Wind speed (m/s)", f"{wind_val:.1f}", 0, 40)
+        metric_widget("Wind speed (m/s)", wind_val, 0, 40, " m/s")
     with c3:
-        metric_widget("Humidity (%)", f"{hum_val:.0f}", 0, 100)
+        metric_widget("Humidity (%)", hum_val, 0, 100, "%")
     with c4:
-        metric_widget("AQI", f"{aqi_val:.0f}", 0, 300)
+        metric_widget("AQI", aqi_val, 0, 300, "")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -252,7 +253,6 @@ if len(X) > 10:
         min_pred = float(np.min(preds))
         max_pred = float(np.max(preds))
 
-        # simple emoji + description
         if max_pred >= 32:
             emoji = "🔥"
             desc = "Very hot, stay hydrated."
