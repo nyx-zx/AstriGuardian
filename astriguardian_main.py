@@ -1,16 +1,18 @@
 import streamlit as st
 import requests
 import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression
 
 # ---------------------------------------------------------
-# STREAMLIT CONFIG & LIQUIDGLASS STYLE
+# CONFIG & LIQUIDGLASS STYLE
 # ---------------------------------------------------------
 st.set_page_config(page_title="AstriGuardian – EarthGuardian", layout="wide")
 
 st.markdown("""
 <style>
 .liquidglass {
-    background: rgba(255,255,255,0.65);
+    background: rgba(255,255,255,0.70);
     padding: 20px;
     border-radius: 22px;
     border: 1px solid rgba(200,200,200,0.6);
@@ -22,22 +24,20 @@ st.markdown("""
 st.title("🛰️ AstriGuardian – EarthGuardian Dashboard")
 
 # ---------------------------------------------------------
-# SIDEBAR INPUTS
+# SIDEBAR
 # ---------------------------------------------------------
 st.sidebar.header("Location")
 lat = st.sidebar.number_input("Latitude", value=8.98, format="%.4f")
 lon = st.sidebar.number_input("Longitude", value=-79.52, format="%.4f")
+days_ahead = st.sidebar.slider("Days to predict", 1, 7, 3)
 
-st.sidebar.write("Data source: Open-Meteo (hourly weather + air quality)")
+st.sidebar.write("Data: Open-Meteo (hourly weather + air quality)")
 
-# ---------------------------------------------------------
-# API ENDPOINTS
-# ---------------------------------------------------------
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 
 # ---------------------------------------------------------
-# FETCH FUNCTIONS (HOURLY ONLY)
+# FETCH FUNCTIONS
 # ---------------------------------------------------------
 def fetch_weather(lat, lon):
     params = {
@@ -83,7 +83,6 @@ hourly_weather = weather["hourly"]
 current = weather["current_weather"]
 hourly_air = air["hourly"]
 
-# Build hourly temp dataframe
 df_temp = pd.DataFrame({
     "time": hourly_weather["time"],
     "temp": hourly_weather["temperature_2m"],
@@ -91,15 +90,16 @@ df_temp = pd.DataFrame({
 df_temp["date"] = df_temp["time"].str.slice(0, 10)
 df_temp.set_index("time", inplace=True)
 
-# Aggregate per day for predictions
-daily_from_hourly = (
-    df_temp.groupby("date")["temp"]
-    .agg(["min", "max"])
-    .reset_index()
-)
+df_air = pd.DataFrame({
+    "time": hourly_air["time"],
+    "aqi": hourly_air["european_aqi"],
+    "pm10": hourly_air["pm10"],
+    "pm2_5": hourly_air["pm2_5"],
+})
+df_air.set_index("time", inplace=True)
 
 # ---------------------------------------------------------
-# MAP + CURRENT WEATHER WIDGETS
+# TOP WIDGETS: MAP + CURRENT WEATHER
 # ---------------------------------------------------------
 col_map, col_current = st.columns([1, 2])
 
@@ -123,7 +123,6 @@ with col_current:
 # ---------------------------------------------------------
 st.markdown('<div class="liquidglass">', unsafe_allow_html=True)
 st.subheader("📈 Hourly temperature")
-
 st.line_chart(df_temp[["temp"]])
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -132,53 +131,59 @@ st.markdown("</div>", unsafe_allow_html=True)
 # ---------------------------------------------------------
 st.markdown('<div class="liquidglass">', unsafe_allow_html=True)
 st.subheader("💨 Air quality (European AQI)")
-
-df_air = pd.DataFrame({
-    "time": hourly_air["time"],
-    "aqi": hourly_air["european_aqi"],
-    "pm10": hourly_air["pm10"],
-    "pm2_5": hourly_air["pm2_5"],
-})
-df_air.set_index("time", inplace=True)
-
 st.line_chart(df_air[["aqi"]])
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# PREDICTIONS SECTION (WIDGETS, HORIZONTAL)
+# PREDICTIONS (ML + WIDGETS)
 # ---------------------------------------------------------
 st.markdown('<div class="liquidglass">', unsafe_allow_html=True)
 st.subheader("🔮 Predictions")
 
-if not daily_from_hourly.empty:
-    # Slider to scroll through days
-    day_index = st.slider(
-        "Scroll through days",
-        min_value=0,
-        max_value=len(daily_from_hourly) - 1,
-        value=0,
-    )
+# Build simple ML model on hourly temps
+df_temp_sorted = df_temp.reset_index().copy()
+df_temp_sorted["t_index"] = np.arange(len(df_temp_sorted))
+X = df_temp_sorted[["t_index"]].values
+y = df_temp_sorted["temp"].values
 
-    selected_day = daily_from_hourly.iloc[day_index]
-    st.markdown("##### Selected day prediction")
-    st.write(
-        f"📅 **{selected_day['date']}** — "
-        f"min **{selected_day['min']:.1f}°C**, "
-        f"max **{selected_day['max']:.1f}°C**"
-    )
+if len(X) > 10:
+    model = LinearRegression()
+    model.fit(X, y)
 
-    st.markdown("##### Upcoming days (widgets)")
-    cols = st.columns(min(len(daily_from_hourly), 5))
-    for i, row in enumerate(daily_from_hourly.itertuples()):
-        if i >= len(cols):
-            break
+    # Predict next N days (assuming 24 hours per day)
+    hours_per_day = 24
+    last_index = df_temp_sorted["t_index"].iloc[-1]
+    future_days = []
+    for d in range(1, days_ahead + 1):
+        start = last_index + (d - 1) * hours_per_day + 1
+        end = last_index + d * hours_per_day
+        future_indices = np.arange(start, end).reshape(-1, 1)
+        preds = model.predict(future_indices)
+        future_days.append({
+            "day_offset": d,
+            "min_pred": float(np.min(preds)),
+            "max_pred": float(np.max(preds)),
+        })
+
+    # Horizontal widgets for predictions
+    st.markdown("##### Upcoming days (prediction widgets)")
+    cols = st.columns(len(future_days))
+    for i, day in enumerate(future_days):
         with cols[i]:
-            st.markdown("###### Day widget")
-            st.write(f"📅 {row.date}")
-            st.write(f"Min: {row.min:.1f}°C")
-            st.write(f"Max: {row.max:.1f}°C")
+            st.markdown("###### Day +" + str(day["day_offset"]))
+            st.write(f"Min: {day['min_pred']:.1f}°C")
+            st.write(f"Max: {day['max_pred']:.1f}°C")
 else:
-    st.write("No prediction data available yet.")
+    st.write("Not enough data for ML predictions yet.")
 
-st.caption("AstriGuardian – predictions derived from hourly temperature data.")
+# Current day summary widget
+st.markdown("##### Today summary")
+c1, c2 = st.columns(2)
+with c1:
+    st.write(f"Current temperature: **{current['temperature']}°C**")
+with c2:
+    current_aqi = hourly_air["european_aqi"][0]
+    st.write(f"Current AQI: **{current_aqi}** (lower is better)")
+
+st.caption("AstriGuardian – ML predictions based on hourly temperature using scikit-learn.")
 st.markdown("</div>", unsafe_allow_html=True)
